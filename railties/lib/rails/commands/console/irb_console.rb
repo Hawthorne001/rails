@@ -10,36 +10,44 @@ module Rails
     end
 
     class ControllerHelper < RailsHelperBase
-      description "Gets the helper methods available to the controller."
+      description "Gets helper methods available to ApplicationController."
 
       # This method assumes an +ApplicationController+ exists, and that it extends ActionController::Base.
       def execute
-        helper
+        ApplicationController.helpers
       end
     end
 
     class ControllerInstance < RailsHelperBase
-      description "Gets a new instance of a controller object."
+      description "Gets a new instance of ApplicationController."
 
       # This method assumes an +ApplicationController+ exists, and that it extends ActionController::Base.
       def execute
-        controller
+        @controller ||= ApplicationController.new
       end
     end
 
     class NewSession < RailsHelperBase
-      description "Create a new session. If a block is given, the new session will be yielded to the block before being returned."
+      description "[Deprecated] Please use `app(true)` instead."
 
-      def execute
-        new_session
+      def execute(*)
+        app = Rails.application
+        session = ActionDispatch::Integration::Session.new(app)
+
+        # This makes app.url_for and app.foo_path available in the console
+        session.extend(app.routes.url_helpers)
+        session.extend(app.routes.mounted_helpers)
+
+        session
       end
     end
 
-    class AppInstance < RailsHelperBase
-      description "Reference the global 'app' instance, created on demand. To recreate the instance, pass a non-false value as the parameter."
+    class AppInstance < NewSession
+      description "Creates a new ActionDispatch::Integration::Session and memoizes it. Use `app(true)` to create a new instance."
 
       def execute(create = false)
-        app(create)
+        @app_integration_instance = nil if create
+        @app_integration_instance ||= super
       end
     end
 
@@ -47,10 +55,11 @@ module Rails
       include ConsoleMethods
 
       category "Rails console"
-      description "Reloads the environment."
+      description "Reloads the Rails application."
 
       def execute(*)
-        reload!
+        puts "Reloading..."
+        Rails.application.reloader.reload!
       end
     end
 
@@ -81,7 +90,8 @@ module Rails
 
         env = colorized_env
         app_name = @app.class.module_parent_name.underscore.dasherize
-        prompt_prefix = "#{app_name}(#{env})"
+        prompt_prefix = "%N(#{env})"
+        IRB.conf[:IRB_NAME] = app_name
 
         IRB.conf[:PROMPT][:RAILS_PROMPT] = {
           PROMPT_I: "#{prompt_prefix}> ",
@@ -100,6 +110,10 @@ module Rails
             Rails.backtrace_cleaner.filter(backtrace)
           end
         end
+
+        # Because some users/libs use Rails::ConsoleMethods to extend Rails console,
+        # we still include it for backward compatibility.
+        IRB::ExtendCommandBundle.include ConsoleMethods
 
         # Respect user's choice of prompt mode.
         IRB.conf[:PROMPT_MODE] = :RAILS_PROMPT if IRB.conf[:PROMPT_MODE] == :DEFAULT

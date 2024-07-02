@@ -64,6 +64,9 @@ The Rails philosophy includes two major guiding principles:
 Creating a New Rails Project
 ----------------------------
 
+TIP: New Rails apps come with a preconfigured Dev Container development environment. This
+is the fastest way to get started with Rails. For instructions see [Getting Started with Dev Containers](getting_started_with_devcontainer.html)
+
 The best way to read this guide is to follow it step by step. All steps are
 essential to run this example application and no additional code or steps are
 needed.
@@ -132,10 +135,10 @@ run the following in a new terminal:
 
 ```bash
 $ rails --version
-Rails 7.2.0
+Rails 8.0.0
 ```
 
-If it says something like "Rails 7.2.0", you are ready to continue.
+If it says something like "Rails 8.0.0", you are ready to continue.
 
 ### Creating the Blog Application
 
@@ -188,7 +191,6 @@ of the files and folders that Rails creates by default:
 |test/|Unit tests, fixtures, and other test apparatus. These are covered in [Testing Rails Applications](testing.html).|
 |tmp/|Temporary files (like cache and pid files).|
 |vendor/|A place for all third-party code. In a typical Rails application this includes vendored gems.|
-|.devcontainer/|This folder contains the configuration for the [development container](https://containers.dev).|
 |.dockerignore|This file tells Docker which files it should not copy into the container.|
 |.gitattributes|This file defines metadata for specific paths in a git repository. This metadata can be used by git and other tools to enhance their behavior. See the [gitattributes documentation](https://git-scm.com/docs/gitattributes) for more information.|
 |.github/|Contains GitHub specific files.|
@@ -470,7 +472,7 @@ $ bin/rails console
 You should see an `irb` prompt like:
 
 ```irb
-Loading development environment (Rails 7.2.0)
+Loading development environment (Rails 8.0.0)
 irb(main):001:0>
 ```
 
@@ -1653,7 +1655,7 @@ Let us also move that new comment section out to its own partial. Again, you
 create a file `app/views/comments/_form.html.erb` containing:
 
 ```html+erb
-<%= form_with model: [ @article, @article.comments.build ] do |form| %>
+<%= form_with model: [ article, article.comments.build ] do |form| %>
   <p>
     <%= form.label :commenter %><br>
     <%= form.text_field :commenter %>
@@ -1687,16 +1689,13 @@ Then you make the `app/views/articles/show.html.erb` look like the following:
 <%= render @article.comments %>
 
 <h2>Add a comment:</h2>
-<%= render 'comments/form' %>
+<%= render "comments/form", article: @article %>
 ```
 
 The second render just defines the partial template we want to render,
 `comments/form`. Rails is smart enough to spot the forward slash in that
 string and realize that you want to render the `_form.html.erb` file in
 the `app/views/comments` directory.
-
-The `@article` object is available to any partials rendered in the view because
-we defined it as an instance variable.
 
 ### Using Concerns
 
