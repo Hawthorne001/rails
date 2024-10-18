@@ -96,6 +96,14 @@ module ActiveRecord
       end
     end
 
+    # Generic fixture accessor for fixture names that may conflict with other methods.
+    #
+    #   assert_equal "Ruby on Rails", web_sites(:rubyonrails).name
+    #   assert_equal "Ruby on Rails", fixture(:web_sites, :rubyonrails).name
+    def fixture(fixture_set_name, *fixture_names)
+      active_record_fixture(fixture_set_name, *fixture_names)
+    end
+
     private
       def run_in_transaction?
         use_transactional_tests &&
@@ -129,12 +137,15 @@ module ActiveRecord
           invalidate_already_loaded_fixtures
           @loaded_fixtures = load_fixtures(config)
         end
+        setup_asynchronous_queries_session
 
         # Instantiate fixtures for every test if requested.
         instantiate_fixtures if use_instantiated_fixtures
       end
 
       def teardown_fixtures
+        teardown_asynchronous_queries_session
+
         # Rollback changes if a transaction is active.
         if run_in_transaction?
           teardown_transactional_fixtures
@@ -144,6 +155,14 @@ module ActiveRecord
         end
 
         ActiveRecord::Base.connection_handler.clear_active_connections!(:all)
+      end
+
+      def setup_asynchronous_queries_session
+        @_async_queries_session = ActiveRecord::Base.asynchronous_queries_tracker.start_session
+      end
+
+      def teardown_asynchronous_queries_session
+        ActiveRecord::Base.asynchronous_queries_tracker.finalize_session(true) if @_async_queries_session
       end
 
       def invalidate_already_loaded_fixtures
@@ -182,6 +201,7 @@ module ActiveRecord
 
       def teardown_transactional_fixtures
         ActiveSupport::Notifications.unsubscribe(@connection_subscriber) if @connection_subscriber
+
         unless @fixture_connection_pools.map(&:unpin_connection!).all?
           # Something caused the transaction to be committed or rolled back
           # We can no longer trust the database is in a clean state.
@@ -255,7 +275,7 @@ module ActiveRecord
 
       def method_missing(method, ...)
         if fixture_sets.key?(method.name)
-          _active_record_fixture(method, ...)
+          active_record_fixture(method, ...)
         else
           super
         end
@@ -269,14 +289,13 @@ module ActiveRecord
         end
       end
 
-      def _active_record_fixture(fixture_set_name, *fixture_names)
+      def active_record_fixture(fixture_set_name, *fixture_names)
         if fs_name = fixture_sets[fixture_set_name.name]
           access_fixture(fs_name, *fixture_names)
         else
           raise StandardError, "No fixture set named '#{fixture_set_name.inspect}'"
         end
       end
-      alias_method :fixture, :_active_record_fixture
 
       def access_fixture(fs_name, *fixture_names)
         force_reload = fixture_names.pop if fixture_names.last == true || fixture_names.last == :reload

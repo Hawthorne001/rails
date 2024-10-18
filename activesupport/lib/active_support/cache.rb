@@ -538,10 +538,11 @@ module ActiveSupport
 
         options = names.extract_options!
         options = merged_options(options)
+        keys    = names.map { |name| normalize_key(name, options) }
 
-        instrument_multi :read_multi, names, options do |payload|
+        instrument_multi :read_multi, keys, options do |payload|
           read_multi_entries(names, **options, event: payload).tap do |results|
-            payload[:hits] = results.keys
+            payload[:hits] = results.keys.map { |name| normalize_key(name, options) }
           end
         end
       end
@@ -551,8 +552,9 @@ module ActiveSupport
         return hash if hash.empty?
 
         options = merged_options(options)
+        normalized_hash = hash.transform_keys { |key| normalize_key(key, options) }
 
-        instrument_multi :write_multi, hash, options do |payload|
+        instrument_multi :write_multi, normalized_hash, options do |payload|
           entries = hash.each_with_object({}) do |(name, value), memo|
             memo[normalize_key(name, options)] = Entry.new(value, **options.merge(version: normalize_version(name, options)))
           end
@@ -596,9 +598,9 @@ module ActiveSupport
 
         options = names.extract_options!
         options = merged_options(options)
-
+        keys    = names.map { |name| normalize_key(name, options) }
         writes  = {}
-        ordered = instrument_multi :read_multi, names, options do |payload|
+        ordered = instrument_multi :read_multi, keys, options do |payload|
           if options[:force]
             reads = {}
           else
@@ -610,7 +612,7 @@ module ActiveSupport
           end
           writes.compact! if options[:skip_nil]
 
-          payload[:hits] = reads.keys
+          payload[:hits] = reads.keys.map { |name| normalize_key(name, options) }
           payload[:super_operation] = :fetch_multi
 
           ordered
@@ -675,7 +677,7 @@ module ActiveSupport
         options = merged_options(options)
         key = normalize_key(name, options)
 
-        instrument(:delete, key) do
+        instrument(:delete, key, options) do
           delete_entry(key, **options)
         end
       end
@@ -690,7 +692,7 @@ module ActiveSupport
         options = merged_options(options)
         names.map! { |key| normalize_key(key, options) }
 
-        instrument_multi :delete_multi, names do
+        instrument_multi(:delete_multi, names, options) do
           delete_multi_entries(names, **options)
         end
       end
@@ -943,9 +945,12 @@ module ActiveSupport
         #
         #   namespace_key 'foo', namespace: -> { 'cache' }
         #   # => 'cache:foo'
-        def namespace_key(key, options = nil)
-          options = merged_options(options)
-          namespace = options[:namespace]
+        def namespace_key(key, call_options = nil)
+          namespace = if call_options&.key?(:namespace)
+            call_options[:namespace]
+          else
+            options[:namespace]
+          end
 
           if namespace.respond_to?(:call)
             namespace = namespace.call
@@ -1030,7 +1035,8 @@ module ActiveSupport
               # When an entry has a positive :race_condition_ttl defined, put the stale entry back into the cache
               # for a brief period while the entry is being recalculated.
               entry.expires_at = Time.now.to_f + race_ttl
-              write_entry(key, entry, expires_in: race_ttl * 2)
+              options[:expires_in] = race_ttl * 2
+              write_entry(key, entry, **options)
             else
               delete_entry(key, **options)
             end

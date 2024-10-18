@@ -1,135 +1,166 @@
-*   Fix `Mime::Type.parse` handling type parameters for HTTP Accept headers.
+*   Improve `ActionController::TestCase` to expose a binary encoded `request.body`.
 
-    *Taylor Chaparro*
+    The rack spec clearly states:
 
-*   Fix the error page that is displayed when a view template is missing to account for nested controller paths in the
-    suggested correct location for the missing template.
+    > The input stream is an IO-like object which contains the raw HTTP POST data.
+    > When applicable, its external encoding must be “ASCII-8BIT” and it must be opened in binary mode.
+
+    Until now its encoding was generally UTF-8, which doesn't accurately reflect production
+    behavior.
+
+    *Jean Boussier*
+
+*   Update `ActionController::AllowBrowser` to support passing method names to `:block`
+
+    ```ruby
+    class ApplicationController < ActionController::Base
+      allow_browser versions: :modern, block: :handle_outdated_browser
+
+      private
+        def handle_outdated_browser
+          render file: Rails.root.join("public/custom-error.html"), status: :not_acceptable
+        end
+    end
+    ```
+
+    *Sean Doyle*
+
+*   Raise an `ArgumentError` when invalid `:only` or `:except` options are passed into `#resource` and `#resources`.
 
     *Joshua Young*
 
-*   Add `save_and_open_page` helper to IntegrationTest
-    `save_and_open_page` is a helpful helper to keep a short feedback loop when working on system tests.
-    A similar helper with matching signature has been added to integration tests.
+## Rails 8.0.0.beta1 (September 26, 2024) ##
 
-    *Joé Dupuis*
+*   Fix non-GET requests not updating cookies in `ActionController::TestCase`.
 
-*   Fix a regression in 7.1.3 passing a `to:` option without a controller when the controller is already defined by a scope.
+    *Jon Moss*, *Hartley McGuire*
 
-    ```ruby
-    Rails.application.routes.draw do
-      controller :home do
-        get "recent", to: "recent_posts"
-      end
-    end
-    ```
+*   Update `ActionController::Live` to use a thread-pool to reuse threads across requests.
 
-    *Étienne Barrié*
+    *Adam Renberg Tamm*
 
-*   Request Forgery takes relative paths into account.
+*   Introduce safer, more explicit params handling method with `params#expect` such that
+    `params.expect(table: [ :attr ])` replaces `params.require(:table).permit(:attr)`
 
-    *Stefan Wienert*
-
-*   Add ".test" as a default allowed host in development to ensure smooth golden-path setup with puma.dev.
-
-    *DHH*
-
-*   Add `allow_browser` to set minimum browser versions for the application.
-
-    A browser that's blocked will by default be served the file in `public/406-unsupported-browser.html` with a HTTP status code of "406 Not Acceptable".
+    Ensures params are filtered with consideration for the expected
+    types of values, improving handling of params and avoiding ignorable
+    errors caused by params tampering.
 
     ```ruby
-    class ApplicationController < ActionController::Base
-      # Allow only browsers natively supporting webp images, web push, badges, import maps, CSS nesting + :has
-      allow_browser versions: :modern
-    end
+    # If the url is altered to ?person=hacked
+    # Before
+    params.require(:person).permit(:name, :age, pets: [:name])
+    # raises NoMethodError, causing a 500 and potential error reporting
 
-    class ApplicationController < ActionController::Base
-      # All versions of Chrome and Opera will be allowed, but no versions of "internet explorer" (ie). Safari needs to be 16.4+ and Firefox 121+.
-      allow_browser versions: { safari: 16.4, firefox: 121, ie: false }
-    end
-
-    class MessagesController < ApplicationController
-      # In addition to the browsers blocked by ApplicationController, also block Opera below 104 and Chrome below 119 for the show action.
-      allow_browser versions: { opera: 104, chrome: 119 }, only: :show
-    end
+    # After
+    params.expect(person: [ :name, :age, pets: [[:name]] ])
+    # raises ActionController::ParameterMissing, correctly returning a 400 error
     ```
 
-    *DHH*
+    You may also notice the new double array `[[:name]]`. In order to
+    declare when a param is expected to be an array of parameter hashes,
+    this new double array syntax is used to explicitly declare an array.
+    `expect` requires you to declare expected arrays in this way, and will
+    ignore arrays that are passed when, for example, `pet: [:name]` is used.
 
-*   Add rate limiting API.
+    In order to preserve compatibility, `permit` does not adopt the new
+    double array syntax and is therefore more permissive about unexpected
+    types. Using `expect` everywhere is recommended.
+
+    We suggest replacing `params.require(:person).permit(:name, :age)`
+    with the direct replacement `params.expect(person: [:name, :age])`
+    to prevent external users from manipulating params to trigger 500
+    errors. A 400 error will be returned instead, using public/400.html
+
+    Usage of `params.require(:id)` should likewise be replaced with
+    `params.expect(:id)` which is designed to ensure that `params[:id]`
+    is a scalar and not an array or hash, also requiring the param.
 
     ```ruby
-    class SessionsController < ApplicationController
-      rate_limit to: 10, within: 3.minutes, only: :create
-    end
+    # Before
+    User.find(params.require(:id)) # allows an array, altering behavior
 
-    class SignupsController < ApplicationController
-      rate_limit to: 1000, within: 10.seconds,
-        by: -> { request.domain }, with: -> { redirect_to busy_controller_url, alert: "Too many signups!" }, only: :new
-    end
+    # After
+    User.find(params.expect(:id)) # expect only returns non-blank permitted scalars (excludes Hash, Array, nil, "", etc)
     ```
 
-    *DHH*, *Jean Boussier*
+    *Martin Emde*
 
-*   Add `image/svg+xml` to the compressible content types of ActionDispatch::Static
+*   System Testing: Disable Chrome's search engine choice by default in system tests.
 
-    *Georg Ledermann*
+    *glaszig*
 
-*   Add instrumentation for ActionController::Live#send_stream
+*   Fix `Request#raw_post` raising `NoMethodError` when `rack.input` is `nil`.
 
-    Allows subscribing to `send_stream` events. The event payload contains the filename, disposition, and type.
+    *Hartley McGuire*
 
-    *Hannah Ramadan*
-
-*   Add support for `with_routing` test helper in `ActionDispatch::IntegrationTest`
+*   Remove `racc` dependency by manually writing `ActionDispatch::Journey::Scanner`.
 
     *Gannon McGibbon*
 
-*   Remove deprecated support to set `Rails.application.config.action_dispatch.show_exceptions` to `true` and `false`.
+*   Speed up `ActionDispatch::Routing::Mapper::Scope#[]` by merging frame hashes.
 
-    *Rafael Mendonça França*
+    *Gannon McGibbon*
 
-*   Remove deprecated `speaker`, `vibrate`, and `vr` permissions policy directives.
+*   Allow bots to ignore `allow_browser`.
 
-    *Rafael Mendonça França*
+    *Matthew Nguyen*
 
-*   Remove deprecated `Rails.application.config.action_dispatch.return_only_request_media_type_on_content_type`.
+*   Deprecate drawing routes with multiple paths to make routing faster.
+    You may use `with_options` or a loop to make drawing multiple paths easier.
 
-    *Rafael Mendonça França*
+    ```ruby
+    # Before
+    get "/users", "/other_path", to: "users#index"
 
-*   Deprecate `Rails.application.config.action_controller.allow_deprecated_parameters_hash_equality`.
+    # After
+    get "/users", to: "users#index"
+    get "/other_path", to: "users#index"
+    ```
 
-    *Rafael Mendonça França*
+    *Gannon McGibbon*
 
-*   Remove deprecated comparison between `ActionController::Parameters` and `Hash`.
+*   Make `http_cache_forever` use `immutable: true`
 
-    *Rafael Mendonça França*
+    *Nate Matykiewicz*
 
-*   Remove deprecated constant `AbstractController::Helpers::MissingHelperError`.
+*   Add `config.action_dispatch.strict_freshness`.
 
-    *Rafael Mendonça França*
+    When set to `true`, the `ETag` header takes precedence over the `Last-Modified` header when both are present,
+    as specified by RFC 7232, Section 6.
 
-*   Fix a race condition that could cause a `Text file busy - chromedriver`
-    error with parallel system tests
+    Defaults to `false` to maintain compatibility with previous versions of Rails, but is enabled as part of
+    Rails 8.0 defaults.
 
-    *Matt Brictson*
+    *heka1024*
 
-*   Add `racc` as a dependency since it will become a bundled gem in Ruby 3.4.0
+*   Support `immutable` directive in Cache-Control
 
-    *Hartley McGuire*
-*   Remove deprecated constant `ActionDispatch::IllegalStateError`.
+    ```ruby
+    expires_in 1.minute, public: true, immutable: true
+    # Cache-Control: public, max-age=60, immutable
+    ```
 
-    *Rafael Mendonça França*
+    *heka1024*
 
-*   Add parameter filter capability for redirect locations.
+*   Add `:wasm_unsafe_eval` mapping for `content_security_policy`
 
-    It uses the `config.filter_parameters` to match what needs to be filtered.
-    The result would be like this:
+    ```ruby
+    # Before
+    policy.script_src "'wasm-unsafe-eval'"
 
-        Redirected to http://secret.foo.bar?username=roque&password=[FILTERED]
+    # After
+    policy.script_src :wasm_unsafe_eval
+    ```
 
-    Fixes #14055.
+    *Joe Haig*
 
-    *Roque Pinel*, *Trevor Turk*, *tonytonyjan*
+*   Add `display_capture` and `keyboard_map` in `permissions_policy`
 
-Please check [7-1-stable](https://github.com/rails/rails/blob/7-1-stable/actionpack/CHANGELOG.md) for previous changes.
+    *Cyril Blaecke*
+
+*   Add `connect` route helper.
+
+    *Samuel Williams*
+
+Please check [7-2-stable](https://github.com/rails/rails/blob/7-2-stable/actionpack/CHANGELOG.md) for previous changes.

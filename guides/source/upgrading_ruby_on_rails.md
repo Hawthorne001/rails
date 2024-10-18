@@ -20,6 +20,7 @@ The best way to be sure that your application still works after upgrading is to 
 
 Rails generally stays close to the latest released Ruby version when it's released:
 
+* Rails 8.0 requires Ruby 3.2.0 or newer.
 * Rails 7.2 requires Ruby 3.1.0 or newer.
 * Rails 7.0 and 7.1 requires Ruby 2.7.0 or newer.
 * Rails 6 requires Ruby 2.5.0 or newer.
@@ -44,8 +45,8 @@ Repeat this process until you reach your target Rails version.
 
 To move between versions:
 
-1. Change the Rails version number in the `Gemfile` and run `bundle update`.
-2. Change the versions for Rails JavaScript packages in `package.json` and run `bin/rails javascript:install` if running jsbundling-rails
+1. Change the Rails version number in the `Gemfile` and run `bundle update rails`.
+2. Change the versions for Rails JavaScript packages in `package.json` and run `bin/rails javascript:install` if running jsbundling-rails.
 3. Run the [Update task](#the-update-task).
 4. Run your tests.
 
@@ -64,11 +65,11 @@ $ bin/rails app:update
     conflict  config/application.rb
 Overwrite /myapp/config/application.rb? (enter "h" for help) [Ynaqdh]
        force  config/application.rb
-      create  config/initializers/new_framework_defaults_7_2.rb
+      create  config/initializers/new_framework_defaults_8_0.rb
 ...
 ```
 
-Don't forget to review the difference, to see if there were any unexpected changes.
+Don't forget to review the difference, to see if there were any unexpected changes, and note that the diff and merge tools used during this process can be defined using the `THOR_DIFF` and `THOR_MERGE` environment variables.
 
 ### Configure Framework Defaults
 
@@ -76,15 +77,43 @@ The new Rails version might have different configuration defaults than the previ
 
 To allow you to upgrade to new defaults one by one, the update task has created a file `config/initializers/new_framework_defaults_X.Y.rb` (with the desired Rails version in the filename). You should enable the new configuration defaults by uncommenting them in the file; this can be done gradually over several deployments. Once your application is ready to run with new defaults, you can remove this file and flip the `config.load_defaults` value.
 
+Upgrading from Rails 7.2 to Rails 8.0
+-------------------------------------
+
+For more information on changes made to Rails 8.0 please see the [release notes](8_0_release_notes.html).
+
 Upgrading from Rails 7.1 to Rails 7.2
 -------------------------------------
 
 For more information on changes made to Rails 7.2 please see the [release notes](7_2_release_notes.html).
 
+### All tests now respect the `active_job.queue_adapter` config
+
+If you have set `config.active_job.queue_adapter` in your `config/application.rb` or `config/environments/test.rb` file,
+the adapter you selected was previously not used consistently across all tests. In some tests your adapter would be
+used, but other tests would use the `TestAdapter`.
+
+In Rails 7.2, all tests will respect the `queue_adapter` config if provided. This may cause test errors, if you had
+set the `queue_adapter` config to something other than `:test`, but written tests in a way that was dependent on the `TestAdapter`.
+
+If no config is provided, the `TestAdapter` will continue to be used.
+
 Upgrading from Rails 7.0 to Rails 7.1
 -------------------------------------
 
 For more information on changes made to Rails 7.1 please see the [release notes](7_1_release_notes.html).
+
+### Development and test environments secret_key_base file changed
+
+In development and test environments, the file from which Rails reads the `secret_key_base` has been renamed from `tmp/development_secret.txt` to `tmp/local_secret.txt`.
+
+You can simply rename the previous file to `local_secret.txt` to continue using the same secret, or copy the key from the previous file to the new one.
+
+Failure to do so will cause Rails to generate a new secret key in the new file `tmp/local_secret.txt` when the app loads.
+
+This will invalidate all existing sessions/cookies in development and test environments, and also cause other signatures derived from `secret_key_base` to break, such as Active Storage/Action Text attachments.
+
+Production and other environments are not affected.
 
 ### Autoloaded paths are no longer in $LOAD_PATH
 

@@ -32,7 +32,7 @@ class SchemaDumperTest < ActiveRecord::TestCase
 
     schema_info = ActiveRecord::Base.lease_connection.dump_schema_information
     expected = <<~STR
-    INSERT INTO #{ActiveRecord::Base.lease_connection.quote_table_name("schema_migrations")} (version) VALUES
+    INSERT INTO #{quote_table_name("schema_migrations")} (version) VALUES
     ('20100301010101'),
     ('20100201010101'),
     ('20100101010101');
@@ -138,7 +138,7 @@ class SchemaDumperTest < ActiveRecord::TestCase
       assert_match %r{c_int_4.*limit: 4}, output
     end
 
-    if current_adapter?(:SQLite3Adapter, :OracleAdapter)
+    if current_adapter?(:SQLite3Adapter)
       assert_match %r{c_int_5.*limit: 5}, output
       assert_match %r{c_int_6.*limit: 6}, output
       assert_match %r{c_int_7.*limit: 7}, output
@@ -419,16 +419,17 @@ class SchemaDumperTest < ActiveRecord::TestCase
         assert_equal ["hstore", "uuid-ossp", "xml2"], enabled_extensions
       end
     end
+
+    def test_schema_dump_include_limit_for_float4_field
+      output = dump_table_schema "numeric_data"
+      assert_match %r{t\.float\s+"temperature_with_limit",\s+limit: 24$}, output
+    end
   end
 
   def test_schema_dump_keeps_large_precision_integer_columns_as_decimal
     output = standard_dump
-    # Oracle supports precision up to 38 and it identifies decimals with scale 0 as integers
-    if current_adapter?(:OracleAdapter)
-      assert_match %r{t\.integer\s+"atoms_in_universe",\s+precision: 38}, output
-    else
-      assert_match %r{t\.decimal\s+"atoms_in_universe",\s+precision: 55}, output
-    end
+
+    assert_match %r{t\.decimal\s+"atoms_in_universe",\s+precision: 55}, output
   end
 
   def test_schema_dump_keeps_id_column_when_id_is_false_and_id_column_added
@@ -938,13 +939,7 @@ class SchemaDumperDefaultsTest < ActiveRecord::TestCase
 
     assert_match %r{t\.string\s+"string_with_default",.*?default: "Hello!"}, output
     assert_match %r{t\.date\s+"date_with_default",\s+default: "2014-06-05"}, output
-
-    if supports_datetime_with_precision?
-      assert_match %r{t\.datetime\s+"datetime_with_default",\s+default: "2014-06-05 07:17:04"}, output
-    else
-      assert_match %r{t\.datetime\s+"datetime_with_default",\s+precision: nil,\s+default: "2014-06-05 07:17:04"}, output
-    end
-
+    assert_match %r{t\.datetime\s+"datetime_with_default",\s+default: "2014-06-05 07:17:04"}, output
     assert_match %r{t\.time\s+"time_with_default",\s+default: "2000-01-01 07:17:04"}, output
     assert_match %r{t\.decimal\s+"decimal_with_default",\s+precision: 20,\s+scale: 10,\s+default: "1234567890.0123456789"}, output
   end

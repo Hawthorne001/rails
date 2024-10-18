@@ -75,7 +75,7 @@ module ActiveRecord
       end
 
       def test_rename_nonexistent_column
-        exception = if current_adapter?(:PostgreSQLAdapter, :OracleAdapter)
+        exception = if current_adapter?(:PostgreSQLAdapter)
           ActiveRecord::StatementInvalid
         else
           ActiveRecord::ActiveRecordError
@@ -147,7 +147,7 @@ module ActiveRecord
 
         # Every database and/or database adapter has their own behavior
         # if it drops the multi-column index when any of the indexed columns dropped by remove_column.
-        if current_adapter?(:PostgreSQLAdapter, :OracleAdapter)
+        if current_adapter?(:PostgreSQLAdapter)
           assert_equal [], connection.indexes("test_models").map(&:name)
         else
           assert_equal ["index_test_models_on_hat_style_and_hat_size"], connection.indexes("test_models").map(&:name)
@@ -343,7 +343,7 @@ module ActiveRecord
         e = assert_raise(ArgumentError) do
           connection.change_column_null "test_models", "first_name", from: true, to: false
         end
-        assert_equal "change_column_null expects a boolean value (true for NULL, false for NOT NULL). Got: {:from=>true, :to=>false}", e.message
+        assert_equal "change_column_null expects a boolean value (true for NULL, false for NOT NULL). Got: #{{ from: true, to: false }}", e.message
       end
 
       def test_remove_column_no_second_parameter_raises_exception

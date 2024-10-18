@@ -1,6 +1,6 @@
 /*
-Trix 2.0.7
-Copyright © 2023 37signals, LLC
+Trix 2.1.7
+Copyright © 2024 37signals, LLC
  */
 (function (global, factory) {
   typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
@@ -9,7 +9,7 @@ Copyright © 2023 37signals, LLC
 })(this, (function () { 'use strict';
 
   var name = "trix";
-  var version = "2.0.7";
+  var version = "2.1.7";
   var description = "A rich text editor for everyday writing";
   var main = "dist/trix.umd.min.js";
   var module = "dist/trix.esm.min.js";
@@ -17,6 +17,7 @@ Copyright © 2023 37signals, LLC
   var files = [
   	"dist/*.css",
   	"dist/*.js",
+  	"dist/*.map",
   	"src/{inspector,trix}/*.js"
   ];
   var repository = {
@@ -130,6 +131,7 @@ Copyright © 2023 37signals, LLC
     code: {
       tagName: "pre",
       terminal: true,
+      htmlAttributes: ["language"],
       text: {
         plaintext: true
       }
@@ -1035,7 +1037,11 @@ $\
   const getCSPNonce = function () {
     const element = getMetaElement("trix-csp-nonce") || getMetaElement("csp-nonce");
     if (element) {
-      return element.getAttribute("content");
+      const {
+        nonce,
+        content
+      } = element;
+      return nonce == "" ? content : nonce;
     }
   };
   const getMetaElement = name => document.head.querySelector("meta[name=".concat(name, "]"));
@@ -1056,6 +1062,12 @@ $\
     } else {
       return text === null || text === void 0 ? void 0 : text.length;
     }
+  };
+  const dataTransferIsMsOfficePaste = _ref => {
+    let {
+      dataTransfer
+    } = _ref;
+    return dataTransfer.types.includes("Files") && dataTransfer.types.includes("text/html") && dataTransfer.getData("text/html").includes("urn:schemas-microsoft-com:office:office");
   };
   const dataTransferIsWritable = function (dataTransfer) {
     if (!(dataTransfer !== null && dataTransfer !== void 0 && dataTransfer.setData)) return false;
@@ -1215,7 +1227,7 @@ $\
       no-useless-escape,
   */
   const normalizeSpaces = string => string.replace(new RegExp("".concat(ZERO_WIDTH_SPACE), "g"), "").replace(new RegExp("".concat(NON_BREAKING_SPACE), "g"), " ");
-  const normalizeNewlines = string => string.replace(/\r\n/g, "\n");
+  const normalizeNewlines = string => string.replace(/\r\n?/g, "\n");
   const breakableWhitespacePattern = new RegExp("[^\\S".concat(NON_BREAKING_SPACE, "]"));
   const squishBreakableWhitespace = string => string
   // Replace all breakable whitespace characters with a space
@@ -1705,6 +1717,116 @@ $\
     }
   }
 
+  const DEFAULT_ALLOWED_ATTRIBUTES = "style href src width height language class".split(" ");
+  const DEFAULT_FORBIDDEN_PROTOCOLS = "javascript:".split(" ");
+  const DEFAULT_FORBIDDEN_ELEMENTS = "script iframe form noscript".split(" ");
+  class HTMLSanitizer extends BasicObject {
+    static setHTML(element, html) {
+      const sanitizedElement = new this(html).sanitize();
+      const sanitizedHtml = sanitizedElement.getHTML ? sanitizedElement.getHTML() : sanitizedElement.outerHTML;
+      element.innerHTML = sanitizedHtml;
+    }
+    static sanitize(html, options) {
+      const sanitizer = new this(html, options);
+      sanitizer.sanitize();
+      return sanitizer;
+    }
+    constructor(html) {
+      let {
+        allowedAttributes,
+        forbiddenProtocols,
+        forbiddenElements
+      } = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      super(...arguments);
+      this.allowedAttributes = allowedAttributes || DEFAULT_ALLOWED_ATTRIBUTES;
+      this.forbiddenProtocols = forbiddenProtocols || DEFAULT_FORBIDDEN_PROTOCOLS;
+      this.forbiddenElements = forbiddenElements || DEFAULT_FORBIDDEN_ELEMENTS;
+      this.body = createBodyElementForHTML(html);
+    }
+    sanitize() {
+      this.sanitizeElements();
+      return this.normalizeListElementNesting();
+    }
+    getHTML() {
+      return this.body.innerHTML;
+    }
+    getBody() {
+      return this.body;
+    }
+
+    // Private
+
+    sanitizeElements() {
+      const walker = walkTree(this.body);
+      const nodesToRemove = [];
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        switch (node.nodeType) {
+          case Node.ELEMENT_NODE:
+            if (this.elementIsRemovable(node)) {
+              nodesToRemove.push(node);
+            } else {
+              this.sanitizeElement(node);
+            }
+            break;
+          case Node.COMMENT_NODE:
+            nodesToRemove.push(node);
+            break;
+        }
+      }
+      nodesToRemove.forEach(node => removeNode(node));
+      return this.body;
+    }
+    sanitizeElement(element) {
+      if (element.hasAttribute("href")) {
+        if (this.forbiddenProtocols.includes(element.protocol)) {
+          element.removeAttribute("href");
+        }
+      }
+      Array.from(element.attributes).forEach(_ref => {
+        let {
+          name
+        } = _ref;
+        if (!this.allowedAttributes.includes(name) && name.indexOf("data-trix") !== 0) {
+          element.removeAttribute(name);
+        }
+      });
+      return element;
+    }
+    normalizeListElementNesting() {
+      Array.from(this.body.querySelectorAll("ul,ol")).forEach(listElement => {
+        const previousElement = listElement.previousElementSibling;
+        if (previousElement) {
+          if (tagName(previousElement) === "li") {
+            previousElement.appendChild(listElement);
+          }
+        }
+      });
+      return this.body;
+    }
+    elementIsRemovable(element) {
+      if ((element === null || element === void 0 ? void 0 : element.nodeType) !== Node.ELEMENT_NODE) return;
+      return this.elementIsForbidden(element) || this.elementIsntSerializable(element);
+    }
+    elementIsForbidden(element) {
+      return this.forbiddenElements.includes(tagName(element));
+    }
+    elementIsntSerializable(element) {
+      return element.getAttribute("data-trix-serialize") === "false" && !nodeIsAttachmentElement(element);
+    }
+  }
+  const createBodyElementForHTML = function () {
+    let html = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : "";
+    // Remove everything after </html>
+    html = html.replace(/<\/html[^>]*>[^]*$/i, "</html>");
+    const doc = document.implementation.createHTMLDocument("");
+    doc.documentElement.innerHTML = html;
+    Array.from(doc.head.querySelectorAll("style")).forEach(element => {
+      doc.body.appendChild(element);
+    });
+    return doc.body;
+  };
+
   const {
     css: css$2
   } = config;
@@ -1739,7 +1861,7 @@ $\
         figure.appendChild(innerElement);
       }
       if (this.attachment.hasContent()) {
-        innerElement.innerHTML = this.attachment.getContent();
+        HTMLSanitizer.setHTML(innerElement, this.attachment.getContent());
       } else {
         this.createContentNodes().forEach(node => {
           innerElement.appendChild(node);
@@ -1867,7 +1989,7 @@ $\
   });
   const htmlContainsTagName = function (html, tagName) {
     const div = makeElement("div");
-    div.innerHTML = html || "";
+    HTMLSanitizer.setHTML(div, html || "");
     return div.querySelector(tagName);
   };
 
@@ -2144,20 +2266,28 @@ $\
       }
     }
     createContainerElement(depth) {
-      let attributes, className;
+      const attributes = {};
+      let className;
       const attributeName = this.attributes[depth];
       const {
-        tagName
+        tagName,
+        htmlAttributes = []
       } = getBlockConfig(attributeName);
       if (depth === 0 && this.block.isRTL()) {
-        attributes = {
+        Object.assign(attributes, {
           dir: "rtl"
-        };
+        });
       }
       if (attributeName === "attachmentGallery") {
         const size = this.block.getBlockBreakPosition();
         className = "".concat(css$1.attachmentGallery, " ").concat(css$1.attachmentGallery, "--").concat(size);
       }
+      Object.entries(this.block.htmlAttributes).forEach(_ref => {
+        let [name, value] = _ref;
+        if (htmlAttributes.includes(name)) {
+          attributes[name] = value;
+        }
+      });
       return makeElement({
         tagName,
         className,
@@ -5828,28 +5958,29 @@ $\
   class Block extends TrixObject {
     static fromJSON(blockJSON) {
       const text = Text.fromJSON(blockJSON.text);
-      return new this(text, blockJSON.attributes);
+      return new this(text, blockJSON.attributes, blockJSON.htmlAttributes);
     }
-    constructor(text, attributes) {
+    constructor(text, attributes, htmlAttributes) {
       super(...arguments);
       this.text = applyBlockBreakToText(text || new Text());
       this.attributes = attributes || [];
+      this.htmlAttributes = htmlAttributes || {};
     }
     isEmpty() {
       return this.text.isBlockBreak();
     }
     isEqualTo(block) {
       if (super.isEqualTo(block)) return true;
-      return this.text.isEqualTo(block === null || block === void 0 ? void 0 : block.text) && arraysAreEqual(this.attributes, block === null || block === void 0 ? void 0 : block.attributes);
+      return this.text.isEqualTo(block === null || block === void 0 ? void 0 : block.text) && arraysAreEqual(this.attributes, block === null || block === void 0 ? void 0 : block.attributes) && objectsAreEqual(this.htmlAttributes, block === null || block === void 0 ? void 0 : block.htmlAttributes);
     }
     copyWithText(text) {
-      return new Block(text, this.attributes);
+      return new Block(text, this.attributes, this.htmlAttributes);
     }
     copyWithoutText() {
       return this.copyWithText(null);
     }
     copyWithAttributes(attributes) {
-      return new Block(this.text, attributes);
+      return new Block(this.text, attributes, this.htmlAttributes);
     }
     copyWithoutAttributes() {
       return this.copyWithAttributes(null);
@@ -5865,6 +5996,12 @@ $\
     addAttribute(attribute) {
       const attributes = this.attributes.concat(expandAttribute(attribute));
       return this.copyWithAttributes(attributes);
+    }
+    addHTMLAttribute(attribute, value) {
+      const htmlAttributes = Object.assign({}, this.htmlAttributes, {
+        [attribute]: value
+      });
+      return new Block(this.text, this.attributes, htmlAttributes);
     }
     removeAttribute(attribute) {
       const {
@@ -5962,7 +6099,8 @@ $\
     toJSON() {
       return {
         text: this.text,
-        attributes: this.attributes
+        attributes: this.attributes,
+        htmlAttributes: this.htmlAttributes
       };
     }
 
@@ -6324,6 +6462,11 @@ $\
     removeAttributeForAttachment(attribute, attachment) {
       const range = this.getRangeOfAttachment(attachment);
       return this.removeAttributeAtRange(attribute, range);
+    }
+    setHTMLAttributeAtPosition(position, name, value) {
+      const block = this.getBlockAtPosition(position);
+      const updatedBlock = block.addHTMLAttribute(name, value);
+      return this.replaceBlock(block, updatedBlock);
     }
     insertBlockBreakAtRange(range) {
       let blocks;
@@ -6793,111 +6936,6 @@ $\
     return attributes;
   };
 
-  const DEFAULT_ALLOWED_ATTRIBUTES = "style href src width height class".split(" ");
-  const DEFAULT_FORBIDDEN_PROTOCOLS = "javascript:".split(" ");
-  const DEFAULT_FORBIDDEN_ELEMENTS = "script iframe form".split(" ");
-  class HTMLSanitizer extends BasicObject {
-    static sanitize(html, options) {
-      const sanitizer = new this(html, options);
-      sanitizer.sanitize();
-      return sanitizer;
-    }
-    constructor(html) {
-      let {
-        allowedAttributes,
-        forbiddenProtocols,
-        forbiddenElements
-      } = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-      super(...arguments);
-      this.allowedAttributes = allowedAttributes || DEFAULT_ALLOWED_ATTRIBUTES;
-      this.forbiddenProtocols = forbiddenProtocols || DEFAULT_FORBIDDEN_PROTOCOLS;
-      this.forbiddenElements = forbiddenElements || DEFAULT_FORBIDDEN_ELEMENTS;
-      this.body = createBodyElementForHTML(html);
-    }
-    sanitize() {
-      this.sanitizeElements();
-      return this.normalizeListElementNesting();
-    }
-    getHTML() {
-      return this.body.innerHTML;
-    }
-    getBody() {
-      return this.body;
-    }
-
-    // Private
-
-    sanitizeElements() {
-      const walker = walkTree(this.body);
-      const nodesToRemove = [];
-      while (walker.nextNode()) {
-        const node = walker.currentNode;
-        switch (node.nodeType) {
-          case Node.ELEMENT_NODE:
-            if (this.elementIsRemovable(node)) {
-              nodesToRemove.push(node);
-            } else {
-              this.sanitizeElement(node);
-            }
-            break;
-          case Node.COMMENT_NODE:
-            nodesToRemove.push(node);
-            break;
-        }
-      }
-      nodesToRemove.forEach(node => removeNode(node));
-      return this.body;
-    }
-    sanitizeElement(element) {
-      if (element.hasAttribute("href")) {
-        if (this.forbiddenProtocols.includes(element.protocol)) {
-          element.removeAttribute("href");
-        }
-      }
-      Array.from(element.attributes).forEach(_ref => {
-        let {
-          name
-        } = _ref;
-        if (!this.allowedAttributes.includes(name) && name.indexOf("data-trix") !== 0) {
-          element.removeAttribute(name);
-        }
-      });
-      return element;
-    }
-    normalizeListElementNesting() {
-      Array.from(this.body.querySelectorAll("ul,ol")).forEach(listElement => {
-        const previousElement = listElement.previousElementSibling;
-        if (previousElement) {
-          if (tagName(previousElement) === "li") {
-            previousElement.appendChild(listElement);
-          }
-        }
-      });
-      return this.body;
-    }
-    elementIsRemovable(element) {
-      if ((element === null || element === void 0 ? void 0 : element.nodeType) !== Node.ELEMENT_NODE) return;
-      return this.elementIsForbidden(element) || this.elementIsntSerializable(element);
-    }
-    elementIsForbidden(element) {
-      return this.forbiddenElements.includes(tagName(element));
-    }
-    elementIsntSerializable(element) {
-      return element.getAttribute("data-trix-serialize") === "false" && !nodeIsAttachmentElement(element);
-    }
-  }
-  const createBodyElementForHTML = function () {
-    let html = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : "";
-    // Remove everything after </html>
-    html = html.replace(/<\/html[^>]*>[^]*$/i, "</html>");
-    const doc = document.implementation.createHTMLDocument("");
-    doc.documentElement.innerHTML = html;
-    Array.from(doc.head.querySelectorAll("style")).forEach(element => {
-      doc.body.appendChild(element);
-    });
-    return doc.body;
-  };
-
   /* eslint-disable
       no-case-declarations,
       no-irregular-whitespace,
@@ -6923,10 +6961,12 @@ $\
   };
   const blockForAttributes = function () {
     let attributes = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
+    let htmlAttributes = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
     const text = [];
     return {
       text,
-      attributes
+      attributes,
+      htmlAttributes
     };
   };
   const parseTrixDataAttribute = (element, name) => {
@@ -6974,8 +7014,7 @@ $\
     parse() {
       try {
         this.createHiddenContainer();
-        const html = HTMLSanitizer.sanitize(this.html).getHTML();
-        this.containerElement.innerHTML = html;
+        HTMLSanitizer.setHTML(this.containerElement, this.html);
         const walker = walkTree(this.containerElement, {
           usingFilter: nodeFilter
         });
@@ -7027,8 +7066,9 @@ $\
       } else if (element === this.containerElement || this.isBlockElement(element)) {
         var _this$currentBlock;
         const attributes = this.getBlockAttributes(element);
+        const htmlAttributes = this.getBlockHTMLAttributes(element);
         if (!arraysAreEqual(attributes, (_this$currentBlock = this.currentBlock) === null || _this$currentBlock === void 0 ? void 0 : _this$currentBlock.attributes)) {
-          this.currentBlock = this.appendBlockForAttributesWithElement(attributes, element);
+          this.currentBlock = this.appendBlockForAttributesWithElement(attributes, element, htmlAttributes);
           this.currentBlockElement = element;
         }
       }
@@ -7039,9 +7079,10 @@ $\
       if (elementIsBlockElement && !this.isBlockElement(element.firstChild)) {
         if (!this.isInsignificantTextNode(element.firstChild) || !this.isBlockElement(element.firstElementChild)) {
           const attributes = this.getBlockAttributes(element);
+          const htmlAttributes = this.getBlockHTMLAttributes(element);
           if (element.firstChild) {
             if (!(currentBlockContainsElement && arraysAreEqual(attributes, this.currentBlock.attributes))) {
-              this.currentBlock = this.appendBlockForAttributesWithElement(attributes, element);
+              this.currentBlock = this.appendBlockForAttributesWithElement(attributes, element, htmlAttributes);
               this.currentBlockElement = element;
             } else {
               return this.appendStringWithAttributes("\n");
@@ -7129,8 +7170,9 @@ $\
     // Document construction
 
     appendBlockForAttributesWithElement(attributes, element) {
+      let htmlAttributes = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
       this.blockElements.push(element);
-      const block = blockForAttributes(attributes);
+      const block = blockForAttributes(attributes, htmlAttributes);
       this.blocks.push(block);
       return block;
     }
@@ -7234,6 +7276,17 @@ $\
         element = element.parentNode;
       }
       return attributes$1.reverse();
+    }
+    getBlockHTMLAttributes(element) {
+      const attributes$1 = {};
+      const blockConfig = Object.values(attributes).find(settings => settings.tagName === tagName(element));
+      const allowedAttributes = (blockConfig === null || blockConfig === void 0 ? void 0 : blockConfig.htmlAttributes) || [];
+      allowedAttributes.forEach(attribute => {
+        if (element.hasAttribute(attribute)) {
+          attributes$1[attribute] = element.getAttribute(attribute);
+        }
+      });
+      return attributes$1;
     }
     findBlockElementAncestors(element) {
       const ancestors = [];
@@ -7830,6 +7883,15 @@ $\
         return this.notifyDelegateOfCurrentAttributesChange();
       }
     }
+    setHTMLAtributeAtPosition(position, attributeName, value) {
+      var _getBlockConfig;
+      const block = this.document.getBlockAtPosition(position);
+      const allowedHTMLAttributes = (_getBlockConfig = getBlockConfig(block.getLastAttribute())) === null || _getBlockConfig === void 0 ? void 0 : _getBlockConfig.htmlAttributes;
+      if (block && allowedHTMLAttributes !== null && allowedHTMLAttributes !== void 0 && allowedHTMLAttributes.includes(attributeName)) {
+        const newDocument = this.document.setHTMLAttributeAtPosition(position, attributeName, value);
+        this.setDocument(newDocument);
+      }
+    }
     setTextAttribute(attributeName, value) {
       const selectedRange = this.getSelectedRange();
       if (!selectedRange) return;
@@ -7877,10 +7939,10 @@ $\
       return ((_this$getBlock = this.getBlock()) === null || _this$getBlock === void 0 ? void 0 : _this$getBlock.getNestingLevel()) > 0;
     }
     canIncreaseNestingLevel() {
-      var _getBlockConfig;
+      var _getBlockConfig2;
       const block = this.getBlock();
       if (!block) return;
-      if ((_getBlockConfig = getBlockConfig(block.getLastNestableAttribute())) !== null && _getBlockConfig !== void 0 && _getBlockConfig.listAttribute) {
+      if ((_getBlockConfig2 = getBlockConfig(block.getLastNestableAttribute())) !== null && _getBlockConfig2 !== void 0 && _getBlockConfig2.listAttribute) {
         const previousBlock = this.getPreviousBlock();
         if (previousBlock) {
           return arrayStartsWith(previousBlock.getListItemAttributes(), block.getListItemAttributes());
@@ -8519,6 +8581,11 @@ $\
     }
     deactivateAttribute(name) {
       return this.composition.removeCurrentAttribute(name);
+    }
+
+    // HTML attributes
+    setHTMLAtributeAtPosition(position, name, value) {
+      this.composition.setHTMLAtributeAtPosition(position, name, value);
     }
 
     // Nesting level
@@ -10470,7 +10537,7 @@ $\
         return (_this$responder4 = this.responder) === null || _this$responder4 === void 0 ? void 0 : _this$responder4.deleteInDirection(direction);
       };
       const domRange = this.getTargetDOMRange({
-        minLength: 2
+        minLength: this.composing ? 1 : 2
       });
       if (domRange) {
         return this.withTargetDOMRange(domRange, perform);
@@ -10584,6 +10651,11 @@ $\
     },
     beforeinput(event) {
       const handler = this.constructor.inputTypes[event.inputType];
+
+      // Handles bug with Siri dictation on iOS 18+.
+      if (!event.inputType) {
+        this.render();
+      }
       if (handler) {
         this.withEvent(event, handler);
         this.scheduleRender();
@@ -10848,7 +10920,6 @@ $\
       }
     },
     insertFromPaste() {
-      var _dataTransfer$files;
       const {
         dataTransfer
       } = this.event;
@@ -10891,28 +10962,28 @@ $\
           var _this$delegate21;
           return (_this$delegate21 = this.delegate) === null || _this$delegate21 === void 0 ? void 0 : _this$delegate21.inputControllerDidPaste(paste);
         };
-      } else if (html) {
+      } else if (processableFilePaste(this.event)) {
         var _this$delegate22;
-        this.event.preventDefault();
-        paste.type = "text/html";
-        paste.html = html;
+        paste.type = "File";
+        paste.file = dataTransfer.files[0];
         (_this$delegate22 = this.delegate) === null || _this$delegate22 === void 0 || _this$delegate22.inputControllerWillPaste(paste);
         this.withTargetDOMRange(function () {
           var _this$responder34;
-          return (_this$responder34 = this.responder) === null || _this$responder34 === void 0 ? void 0 : _this$responder34.insertHTML(paste.html);
+          return (_this$responder34 = this.responder) === null || _this$responder34 === void 0 ? void 0 : _this$responder34.insertFile(paste.file);
         });
         this.afterRender = () => {
           var _this$delegate23;
           return (_this$delegate23 = this.delegate) === null || _this$delegate23 === void 0 ? void 0 : _this$delegate23.inputControllerDidPaste(paste);
         };
-      } else if ((_dataTransfer$files = dataTransfer.files) !== null && _dataTransfer$files !== void 0 && _dataTransfer$files.length) {
+      } else if (html) {
         var _this$delegate24;
-        paste.type = "File";
-        paste.file = dataTransfer.files[0];
+        this.event.preventDefault();
+        paste.type = "text/html";
+        paste.html = html;
         (_this$delegate24 = this.delegate) === null || _this$delegate24 === void 0 || _this$delegate24.inputControllerWillPaste(paste);
         this.withTargetDOMRange(function () {
           var _this$responder35;
-          return (_this$responder35 = this.responder) === null || _this$responder35 === void 0 ? void 0 : _this$responder35.insertFile(paste.file);
+          return (_this$responder35 = this.responder) === null || _this$responder35 === void 0 ? void 0 : _this$responder35.insertHTML(paste.html);
         });
         this.afterRender = () => {
           var _this$delegate25;
@@ -10941,8 +11012,12 @@ $\
       });
     },
     insertReplacementText() {
-      return this.insertString(this.event.dataTransfer.getData("text/plain"), {
-        updatePosition: false
+      const replacement = this.event.dataTransfer.getData("text/plain");
+      const domRange = this.event.getTargetRanges()[0];
+      this.withTargetDOMRange(domRange, () => {
+        this.insertString(replacement, {
+          updatePosition: false
+        });
       });
     },
     insertText() {
@@ -10969,10 +11044,20 @@ $\
     var _event$dataTransfer;
     return Array.from(((_event$dataTransfer = event.dataTransfer) === null || _event$dataTransfer === void 0 ? void 0 : _event$dataTransfer.types) || []).includes("Files");
   };
+  const processableFilePaste = event => {
+    var _event$dataTransfer$f;
+    // Paste events that only have files are handled by the paste event handler,
+    // to work around Safari not supporting beforeinput.insertFromPaste for files.
+
+    // MS Office text pastes include a file with a screenshot of the text, but we should
+    // handle them as text pastes.
+    return ((_event$dataTransfer$f = event.dataTransfer.files) === null || _event$dataTransfer$f === void 0 ? void 0 : _event$dataTransfer$f[0]) && !pasteEventHasFilesOnly(event) && !dataTransferIsMsOfficePaste(event);
+  };
   const pasteEventHasFilesOnly = function (event) {
     const clipboard = event.clipboardData;
     if (clipboard) {
-      return clipboard.types.includes("Files") && clipboard.types.length === 1 && clipboard.files.length >= 1;
+      const fileTypes = Array.from(clipboard.types).filter(type => type.match(/file/i)); // "Files", "application/x-moz-file"
+      return fileTypes.length === clipboard.types.length && clipboard.files.length >= 1;
     }
   };
   const pasteEventHasPlainTextOnly = function (event) {
@@ -11064,7 +11149,7 @@ $\
         return this.toggleDialog(actionName);
       } else {
         var _this$delegate2;
-        return (_this$delegate2 = this.delegate) === null || _this$delegate2 === void 0 ? void 0 : _this$delegate2.toolbarDidInvokeAction(actionName);
+        return (_this$delegate2 = this.delegate) === null || _this$delegate2 === void 0 ? void 0 : _this$delegate2.toolbarDidInvokeAction(actionName, element);
       }
     }
     didClickAttributeButton(event, element) {
@@ -11509,8 +11594,8 @@ $\
         });
       }
     }
-    toolbarDidInvokeAction(actionName) {
-      return this.invokeAction(actionName);
+    toolbarDidInvokeAction(actionName, invokingElement) {
+      return this.invokeAction(actionName, invokingElement);
     }
     toolbarDidToggleAttribute(attributeName) {
       this.recordFormattingUndoEntry(attributeName);
@@ -11579,10 +11664,11 @@ $\
         return !!((_this$actions$actionN = this.actions[actionName]) !== null && _this$actions$actionN !== void 0 && (_this$actions$actionN = _this$actions$actionN.test) !== null && _this$actions$actionN !== void 0 && _this$actions$actionN.call(this));
       }
     }
-    invokeAction(actionName) {
+    invokeAction(actionName, invokingElement) {
       if (this.actionIsExternal(actionName)) {
         return this.notifyEditorElement("action-invoke", {
-          actionName
+          actionName,
+          invokingElement
         });
       } else {
         var _this$actions$actionN2;
@@ -11637,7 +11723,7 @@ $\
     updateInputElement() {
       const element = this.compositionController.getSerializableElement();
       const value = serializeToContentType(element, "text/html");
-      return this.editorElement.setInputElementValue(value);
+      return this.editorElement.setFormValue(value);
     }
     notifyEditorElement(message, data) {
       switch (message) {
@@ -11894,8 +11980,187 @@ $\
       };
     }
   }();
-  installDefaultCSSForTagName("trix-editor", "%t {\n    display: block;\n}\n\n%t:empty:not(:focus)::before {\n    content: attr(placeholder);\n    color: graytext;\n    cursor: text;\n    pointer-events: none;\n    white-space: pre-line;\n}\n\n%t a[contenteditable=false] {\n    cursor: text;\n}\n\n%t img {\n    max-width: 100%;\n    height: auto;\n}\n\n%t ".concat(attachmentSelector, " figcaption textarea {\n    resize: none;\n}\n\n%t ").concat(attachmentSelector, " figcaption textarea.trix-autoresize-clone {\n    position: absolute;\n    left: -9999px;\n    max-height: 0px;\n}\n\n%t ").concat(attachmentSelector, " figcaption[data-trix-placeholder]:empty::before {\n    content: attr(data-trix-placeholder);\n    color: graytext;\n}\n\n%t [data-trix-cursor-target] {\n    display: ").concat(cursorTargetStyles.display, " !important;\n    width: ").concat(cursorTargetStyles.width, " !important;\n    padding: 0 !important;\n    margin: 0 !important;\n    border: none !important;\n}\n\n%t [data-trix-cursor-target=left] {\n    vertical-align: top !important;\n    margin-left: -1px !important;\n}\n\n%t [data-trix-cursor-target=right] {\n    vertical-align: bottom !important;\n    margin-right: -1px !important;\n}"));
+  installDefaultCSSForTagName("trix-editor", "%t {\n    display: block;\n}\n\n%t:empty::before {\n    content: attr(placeholder);\n    color: graytext;\n    cursor: text;\n    pointer-events: none;\n    white-space: pre-line;\n}\n\n%t a[contenteditable=false] {\n    cursor: text;\n}\n\n%t img {\n    max-width: 100%;\n    height: auto;\n}\n\n%t ".concat(attachmentSelector, " figcaption textarea {\n    resize: none;\n}\n\n%t ").concat(attachmentSelector, " figcaption textarea.trix-autoresize-clone {\n    position: absolute;\n    left: -9999px;\n    max-height: 0px;\n}\n\n%t ").concat(attachmentSelector, " figcaption[data-trix-placeholder]:empty::before {\n    content: attr(data-trix-placeholder);\n    color: graytext;\n}\n\n%t [data-trix-cursor-target] {\n    display: ").concat(cursorTargetStyles.display, " !important;\n    width: ").concat(cursorTargetStyles.width, " !important;\n    padding: 0 !important;\n    margin: 0 !important;\n    border: none !important;\n}\n\n%t [data-trix-cursor-target=left] {\n    vertical-align: top !important;\n    margin-left: -1px !important;\n}\n\n%t [data-trix-cursor-target=right] {\n    vertical-align: bottom !important;\n    margin-right: -1px !important;\n}"));
+  var _internals = /*#__PURE__*/new WeakMap();
+  var _validate = /*#__PURE__*/new WeakSet();
+  class ElementInternalsDelegate {
+    constructor(element) {
+      _classPrivateMethodInitSpec(this, _validate);
+      _classPrivateFieldInitSpec(this, _internals, {
+        writable: true,
+        value: void 0
+      });
+      this.element = element;
+      _classPrivateFieldSet(this, _internals, element.attachInternals());
+    }
+    connectedCallback() {
+      _classPrivateMethodGet(this, _validate, _validate2).call(this);
+    }
+    disconnectedCallback() {}
+    get labels() {
+      return _classPrivateFieldGet(this, _internals).labels;
+    }
+    get disabled() {
+      var _this$element$inputEl;
+      return (_this$element$inputEl = this.element.inputElement) === null || _this$element$inputEl === void 0 ? void 0 : _this$element$inputEl.disabled;
+    }
+    set disabled(value) {
+      this.element.toggleAttribute("disabled", value);
+    }
+    get required() {
+      return this.element.hasAttribute("required");
+    }
+    set required(value) {
+      this.element.toggleAttribute("required", value);
+      _classPrivateMethodGet(this, _validate, _validate2).call(this);
+    }
+    get validity() {
+      return _classPrivateFieldGet(this, _internals).validity;
+    }
+    get validationMessage() {
+      return _classPrivateFieldGet(this, _internals).validationMessage;
+    }
+    get willValidate() {
+      return _classPrivateFieldGet(this, _internals).willValidate;
+    }
+    setFormValue(value) {
+      _classPrivateMethodGet(this, _validate, _validate2).call(this);
+    }
+    checkValidity() {
+      return _classPrivateFieldGet(this, _internals).checkValidity();
+    }
+    reportValidity() {
+      return _classPrivateFieldGet(this, _internals).reportValidity();
+    }
+    setCustomValidity(validationMessage) {
+      _classPrivateMethodGet(this, _validate, _validate2).call(this, validationMessage);
+    }
+  }
+  function _validate2() {
+    let customValidationMessage = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : "";
+    const {
+      required,
+      value
+    } = this.element;
+    const valueMissing = required && !value;
+    const customError = !!customValidationMessage;
+    const input = makeElement("input", {
+      required
+    });
+    const validationMessage = customValidationMessage || input.validationMessage;
+    _classPrivateFieldGet(this, _internals).setValidity({
+      valueMissing,
+      customError
+    }, validationMessage);
+  }
+  var _focusHandler = /*#__PURE__*/new WeakMap();
+  var _resetBubbled = /*#__PURE__*/new WeakMap();
+  var _clickBubbled = /*#__PURE__*/new WeakMap();
+  class LegacyDelegate {
+    constructor(element) {
+      _classPrivateFieldInitSpec(this, _focusHandler, {
+        writable: true,
+        value: void 0
+      });
+      _classPrivateFieldInitSpec(this, _resetBubbled, {
+        writable: true,
+        value: event => {
+          if (event.defaultPrevented) return;
+          if (event.target !== this.element.form) return;
+          this.element.reset();
+        }
+      });
+      _classPrivateFieldInitSpec(this, _clickBubbled, {
+        writable: true,
+        value: event => {
+          if (event.defaultPrevented) return;
+          if (this.element.contains(event.target)) return;
+          const label = findClosestElementFromNode(event.target, {
+            matchingSelector: "label"
+          });
+          if (!label) return;
+          if (!Array.from(this.labels).includes(label)) return;
+          this.element.focus();
+        }
+      });
+      this.element = element;
+    }
+    connectedCallback() {
+      _classPrivateFieldSet(this, _focusHandler, ensureAriaLabel(this.element));
+      window.addEventListener("reset", _classPrivateFieldGet(this, _resetBubbled), false);
+      window.addEventListener("click", _classPrivateFieldGet(this, _clickBubbled), false);
+    }
+    disconnectedCallback() {
+      var _classPrivateFieldGet2;
+      (_classPrivateFieldGet2 = _classPrivateFieldGet(this, _focusHandler)) === null || _classPrivateFieldGet2 === void 0 || _classPrivateFieldGet2.destroy();
+      window.removeEventListener("reset", _classPrivateFieldGet(this, _resetBubbled), false);
+      window.removeEventListener("click", _classPrivateFieldGet(this, _clickBubbled), false);
+    }
+    get labels() {
+      const labels = [];
+      if (this.element.id && this.element.ownerDocument) {
+        labels.push(...Array.from(this.element.ownerDocument.querySelectorAll("label[for='".concat(this.element.id, "']")) || []));
+      }
+      const label = findClosestElementFromNode(this.element, {
+        matchingSelector: "label"
+      });
+      if (label) {
+        if ([this.element, null].includes(label.control)) {
+          labels.push(label);
+        }
+      }
+      return labels;
+    }
+    get disabled() {
+      console.warn("This browser does not support the [disabled] attribute for trix-editor elements.");
+      return false;
+    }
+    set disabled(value) {
+      console.warn("This browser does not support the [disabled] attribute for trix-editor elements.");
+    }
+    get required() {
+      console.warn("This browser does not support the [required] attribute for trix-editor elements.");
+      return false;
+    }
+    set required(value) {
+      console.warn("This browser does not support the [required] attribute for trix-editor elements.");
+    }
+    get validity() {
+      console.warn("This browser does not support the validity property for trix-editor elements.");
+      return null;
+    }
+    get validationMessage() {
+      console.warn("This browser does not support the validationMessage property for trix-editor elements.");
+      return "";
+    }
+    get willValidate() {
+      console.warn("This browser does not support the willValidate property for trix-editor elements.");
+      return false;
+    }
+    setFormValue(value) {}
+    checkValidity() {
+      console.warn("This browser does not support checkValidity() for trix-editor elements.");
+      return true;
+    }
+    reportValidity() {
+      console.warn("This browser does not support reportValidity() for trix-editor elements.");
+      return true;
+    }
+    setCustomValidity(validationMessage) {
+      console.warn("This browser does not support setCustomValidity(validationMessage) for trix-editor elements.");
+    }
+  }
+  var _delegate = /*#__PURE__*/new WeakMap();
   class TrixEditorElement extends HTMLElement {
+    constructor() {
+      super();
+      _classPrivateFieldInitSpec(this, _delegate, {
+        writable: true,
+        value: void 0
+      });
+      _classPrivateFieldSet(this, _delegate, this.constructor.formAssociated ? new ElementInternalsDelegate(this) : new LegacyDelegate(this));
+    }
+
     // Properties
 
     get trixId() {
@@ -11907,19 +12172,31 @@ $\
       }
     }
     get labels() {
-      const labels = [];
-      if (this.id && this.ownerDocument) {
-        labels.push(...Array.from(this.ownerDocument.querySelectorAll("label[for='".concat(this.id, "']")) || []));
-      }
-      const label = findClosestElementFromNode(this, {
-        matchingSelector: "label"
-      });
-      if (label) {
-        if ([this, null].includes(label.control)) {
-          labels.push(label);
-        }
-      }
-      return labels;
+      return _classPrivateFieldGet(this, _delegate).labels;
+    }
+    get disabled() {
+      return _classPrivateFieldGet(this, _delegate).disabled;
+    }
+    set disabled(value) {
+      _classPrivateFieldGet(this, _delegate).disabled = value;
+    }
+    get required() {
+      return _classPrivateFieldGet(this, _delegate).required;
+    }
+    set required(value) {
+      _classPrivateFieldGet(this, _delegate).required = value;
+    }
+    get validity() {
+      return _classPrivateFieldGet(this, _delegate).validity;
+    }
+    get validationMessage() {
+      return _classPrivateFieldGet(this, _delegate).validationMessage;
+    }
+    get willValidate() {
+      return _classPrivateFieldGet(this, _delegate).willValidate;
+    }
+    get type() {
+      return this.localName;
     }
     get toolbarElement() {
       if (this.hasAttribute("toolbar")) {
@@ -11986,9 +12263,10 @@ $\
         });
       }
     }
-    setInputElementValue(value) {
+    setFormValue(value) {
       if (this.inputElement) {
         this.inputElement.value = value;
+        _classPrivateFieldGet(this, _delegate).setFormValue(value);
       }
     }
 
@@ -11998,7 +12276,6 @@ $\
       if (!this.hasAttribute("data-trix-internal")) {
         makeEditable(this);
         addAccessibilityRole(this);
-        ensureAriaLabel(this);
         if (!this.editorController) {
           triggerEvent("trix-before-initialize", {
             onElement: this
@@ -12012,53 +12289,41 @@ $\
           }));
         }
         this.editorController.registerSelectionManager();
-        this.registerResetListener();
-        this.registerClickListener();
+        _classPrivateFieldGet(this, _delegate).connectedCallback();
         autofocus(this);
       }
     }
     disconnectedCallback() {
       var _this$editorControlle2;
       (_this$editorControlle2 = this.editorController) === null || _this$editorControlle2 === void 0 || _this$editorControlle2.unregisterSelectionManager();
-      this.unregisterResetListener();
-      return this.unregisterClickListener();
+      _classPrivateFieldGet(this, _delegate).disconnectedCallback();
     }
 
     // Form support
 
-    registerResetListener() {
-      this.resetListener = this.resetBubbled.bind(this);
-      return window.addEventListener("reset", this.resetListener, false);
+    checkValidity() {
+      return _classPrivateFieldGet(this, _delegate).checkValidity();
     }
-    unregisterResetListener() {
-      return window.removeEventListener("reset", this.resetListener, false);
+    reportValidity() {
+      return _classPrivateFieldGet(this, _delegate).reportValidity();
     }
-    registerClickListener() {
-      this.clickListener = this.clickBubbled.bind(this);
-      return window.addEventListener("click", this.clickListener, false);
+    setCustomValidity(validationMessage) {
+      _classPrivateFieldGet(this, _delegate).setCustomValidity(validationMessage);
     }
-    unregisterClickListener() {
-      return window.removeEventListener("click", this.clickListener, false);
+    formDisabledCallback(disabled) {
+      if (this.inputElement) {
+        this.inputElement.disabled = disabled;
+      }
+      this.toggleAttribute("contenteditable", !disabled);
     }
-    resetBubbled(event) {
-      if (event.defaultPrevented) return;
-      if (event.target !== this.form) return;
-      return this.reset();
-    }
-    clickBubbled(event) {
-      if (event.defaultPrevented) return;
-      if (this.contains(event.target)) return;
-      const label = findClosestElementFromNode(event.target, {
-        matchingSelector: "label"
-      });
-      if (!label) return;
-      if (!Array.from(this.labels).includes(label)) return;
-      return this.focus();
+    formResetCallback() {
+      this.reset();
     }
     reset() {
       this.value = this.defaultValue;
     }
   }
+  _defineProperty(TrixEditorElement, "formAssociated", "ElementInternals" in window);
 
   var elements = /*#__PURE__*/Object.freeze({
     __proto__: null,

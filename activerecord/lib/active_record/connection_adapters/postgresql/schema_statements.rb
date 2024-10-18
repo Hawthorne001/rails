@@ -54,9 +54,9 @@ module ActiveRecord
           execute "DROP DATABASE IF EXISTS #{quote_table_name(name)}"
         end
 
-        def drop_table(table_name, **options) # :nodoc:
-          schema_cache.clear_data_source_cache!(table_name.to_s)
-          execute "DROP TABLE#{' IF EXISTS' if options[:if_exists]} #{quote_table_name(table_name)}#{' CASCADE' if options[:force] == :cascade}"
+        def drop_table(*table_names, **options) # :nodoc:
+          table_names.each { |table_name| schema_cache.clear_data_source_cache!(table_name.to_s) }
+          execute "DROP TABLE#{' IF EXISTS' if options[:if_exists]} #{table_names.map { |table_name| quote_table_name(table_name) }.join(', ')}#{' CASCADE' if options[:force] == :cascade}"
         end
 
         # Returns true if schema exists.
@@ -152,9 +152,23 @@ module ActiveRecord
         end
 
         def table_options(table_name) # :nodoc:
-          if comment = table_comment(table_name)
-            { comment: comment }
+          options = {}
+
+          comment = table_comment(table_name)
+
+          options[:comment] = comment if comment
+
+          inherited_table_names = inherited_table_names(table_name).presence
+
+          options[:options] = "INHERITS (#{inherited_table_names.join(", ")})" if inherited_table_names
+
+          if !options[:options] && supports_native_partitioning?
+            partition_definition = table_partition_definition(table_name)
+
+            options[:options] = "PARTITION BY #{partition_definition}" if partition_definition
           end
+
+          options
         end
 
         # Returns a comment stored in database for given table
@@ -170,6 +184,36 @@ module ActiveRecord
                 AND n.nspname = #{scope[:schema]}
             SQL
           end
+        end
+
+        # Returns the partition definition of a given table
+        def table_partition_definition(table_name) # :nodoc:
+          scope = quoted_scope(table_name, type: "BASE TABLE")
+
+          query_value(<<~SQL, "SCHEMA")
+            SELECT pg_catalog.pg_get_partkeydef(c.oid)
+            FROM pg_catalog.pg_class c
+              LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relname = #{scope[:name]}
+              AND c.relkind IN (#{scope[:type]})
+              AND n.nspname = #{scope[:schema]}
+          SQL
+        end
+
+        # Returns the inherited table name of a given table
+        def inherited_table_names(table_name) # :nodoc:
+          scope = quoted_scope(table_name, type: "BASE TABLE")
+
+          query_values(<<~SQL, "SCHEMA")
+            SELECT parent.relname
+            FROM pg_catalog.pg_inherits i
+              JOIN pg_catalog.pg_class child ON i.inhrelid = child.oid
+              JOIN pg_catalog.pg_class parent ON i.inhparent = parent.oid
+              LEFT JOIN pg_namespace n ON n.oid = child.relnamespace
+            WHERE child.relname = #{scope[:name]}
+              AND child.relkind IN (#{scope[:type]})
+              AND n.nspname = #{scope[:schema]}
+          SQL
         end
 
         # Returns the current database name.
@@ -209,8 +253,16 @@ module ActiveRecord
         end
 
         # Creates a schema for the given schema name.
-        def create_schema(schema_name)
-          execute "CREATE SCHEMA #{quote_schema_name(schema_name)}"
+        def create_schema(schema_name, force: nil, if_not_exists: nil)
+          if force && if_not_exists
+            raise ArgumentError, "Options `:force` and `:if_not_exists` cannot be used simultaneously."
+          end
+
+          if force
+            drop_schema(schema_name, if_exists: true)
+          end
+
+          execute("CREATE SCHEMA#{' IF NOT EXISTS' if if_not_exists} #{quote_schema_name(schema_name)}")
         end
 
         # Drops the schema for the given schema name.
@@ -242,11 +294,13 @@ module ActiveRecord
 
         # Set the client message level.
         def client_min_messages=(level)
-          internal_execute("SET client_min_messages TO '#{level}'")
+          internal_execute("SET client_min_messages TO '#{level}'", "SCHEMA")
         end
 
         # Returns the sequence name for a table's primary key or some other specified key.
         def default_sequence_name(table_name, pk = "id") # :nodoc:
+          return nil if pk.is_a?(Array)
+
           result = serial_sequence(table_name, pk)
           return nil unless result
           Utils.extract_schema_qualified_name(result).to_s
@@ -712,10 +766,7 @@ module ActiveRecord
         def remove_exclusion_constraint(table_name, expression = nil, **options)
           excl_name_to_delete = exclusion_constraint_for!(table_name, expression: expression, **options).name
 
-          at = create_alter_table(table_name)
-          at.drop_exclusion_constraint(excl_name_to_delete)
-
-          execute schema_creation.accept(at)
+          remove_constraint(table_name, excl_name_to_delete)
         end
 
         # Adds a new unique constraint to the table.
@@ -767,10 +818,7 @@ module ActiveRecord
         def remove_unique_constraint(table_name, column_name = nil, **options)
           unique_name_to_delete = unique_constraint_for!(table_name, column: column_name, **options).name
 
-          at = create_alter_table(table_name)
-          at.drop_unique_constraint(unique_name_to_delete)
-
-          execute schema_creation.accept(at)
+          remove_constraint(table_name, unique_name_to_delete)
         end
 
         # Maps logical Rails types to PostgreSQL-specific data types.

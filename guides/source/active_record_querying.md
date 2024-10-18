@@ -1744,13 +1744,12 @@ books.each do |book|
 end
 ```
 
-The above code will execute just **2** queries, as opposed to the **11** queries from the original case:
+The above code will execute just **1** query, as opposed to the **11** queries from the original case:
 
 ```sql
-SELECT DISTINCT books.id FROM books LEFT OUTER JOIN authors ON authors.id = books.author_id LIMIT 10
-SELECT books.id AS t0_r0, books.last_name AS t0_r1, ...
-  FROM books LEFT OUTER JOIN authors ON authors.id = books.author_id
-  WHERE books.id IN (1,2,3,4,5,6,7,8,9,10)
+SELECT "books"."id" AS t0_r0, "books"."title" AS t0_r1, ... FROM "books"
+  LEFT OUTER JOIN "authors" ON "authors"."id" = "books"."author_id"
+  LIMIT 10
 ```
 
 NOTE: The `eager_load` method uses an array, hash, or a nested hash of array/hash in the same way as the `includes` method to load any number of associations with a single `Model.find` call. Also, like the `includes` method, you can specify conditions for eager loaded associations.
@@ -2308,17 +2307,17 @@ irb> Customer.find_by_sql("SELECT * FROM customers INNER JOIN orders ON customer
 
 ### `select_all`
 
-`find_by_sql` has a close relative called [`connection.select_all`][]. `select_all` will retrieve
+`find_by_sql` has a close relative called [`lease_connection.select_all`][]. `select_all` will retrieve
 objects from the database using custom SQL just like `find_by_sql` but will not instantiate them.
 This method will return an instance of `ActiveRecord::Result` class and calling `to_a` on this
 object would return you an array of hashes where each hash indicates a record.
 
 ```irb
-irb> Customer.connection.select_all("SELECT first_name, created_at FROM customers WHERE id = '1'").to_a
+irb> Customer.lease_connection.select_all("SELECT first_name, created_at FROM customers WHERE id = '1'").to_a
 => [{"first_name"=>"Rafael", "created_at"=>"2012-11-10 23:23:45.281189"}, {"first_name"=>"Eileen", "created_at"=>"2013-12-09 11:22:35.221282"}]
 ```
 
-[`connection.select_all`]: https://api.rubyonrails.org/classes/ActiveRecord/ConnectionAdapters/DatabaseStatements.html#method-i-select_all
+[`lease_connection.select_all`]: https://api.rubyonrails.org/classes/ActiveRecord/ConnectionAdapters/DatabaseStatements.html#method-i-select_all
 
 ### `pluck`
 

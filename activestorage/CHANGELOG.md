@@ -1,74 +1,23 @@
-*   Remove deprecated `config.active_storage.silence_invalid_content_types_warning`.
+## Rails 8.0.0.beta1 (September 26, 2024) ##
 
-    *Rafael Mendonça França*
+*   Deprecate `ActiveStorage::Service::AzureStorageService`.
 
-*   Remove deprecated `config.active_storage.replace_on_assign_to_many`.
+    *zzak*
 
-    *Rafael Mendonça França*
+*   Improve `ActiveStorage::Filename#sanitized` method to handle special characters more effectively.
+    Replace the characters `"*?<>` with `-` if they exist in the Filename to match the Filename convention of Win OS.
 
-*   Add support for custom `key` in `ActiveStorage::Blob#compose`.
+    *Luong Viet Dung(Martin)*
 
-    *Elvin Efendiev*
+*   Improve InvariableError, UnpreviewableError and UnrepresentableError message.
 
-*   Add `image/webp` to `config.active_storage.web_image_content_types` when `load_defaults "7.2"`
-    is set.
+    Include Blob ID and content_type in the messages.
 
-    *Lewis Buckley*
+    *Petrik de Heus*
 
-*   Fix JSON-encoding of `ActiveStorage::Filename` instances.
+*   Mark proxied files as `immutable` in their Cache-Control header
 
-    *Jonathan del Strother*
+    *Nate Matykiewicz*
 
-*   Fix N+1 query when fetching preview images for non-image assets
 
-    *Aaron Patterson & Justin Searls*
-
-*   Fix all Active Storage database related models to respect
-    `ActiveRecord::Base.table_name_prefix` configuration.
-
-    *Chedli Bourguiba*
-
-*   Fix `ActiveStorage::Representations::ProxyController` not returning the proper
-    preview image variant for previewable files.
-
-    *Chedli Bourguiba*
-
-*   Fix `ActiveStorage::Representations::ProxyController` to proxy untracked
-    variants.
-
-    *Chedli Bourguiba*
-
-*   When using the `preprocessed: true` option, avoid enqueuing transform jobs
-    for blobs that are not representable.
-
-    *Chedli Bourguiba*
-
-*   Prevent `ActiveStorage::Blob#preview` to generate a variant if an empty variation is passed.
-    Calls to `#url`, `#key` or `#download` will now use the original preview
-    image instead of generating a variant with the exact same dimensions.
-
-    *Chedli Bourguiba*
-
-*   Process preview image variant when calling `ActiveStorage::Preview#processed`.
-    For example, `attached_pdf.preview(:thumb).processed` will now immediately
-    generate the full-sized preview image and the `:thumb` variant of it.
-    Previously, the `:thumb` variant would not be generated until a further call
-    to e.g. `processed.url`.
-
-    *Chedli Bourguiba* and *Jonathan Hefner*
-
-*   Prevent `ActiveRecord::StrictLoadingViolationError` when strict loading is
-    enabled and the variant of an Active Storage preview has already been
-    processed (for example, by calling `ActiveStorage::Preview#url`).
-
-    *Jonathan Hefner*
-
-*   Fix `preprocessed: true` option for named variants of previewable files.
-
-    *Nico Wenterodt*
-
-*   Allow accepting `service` as a proc as well in `has_one_attached` and `has_many_attached`.
-
-    *Yogesh Khater*
-
-Please check [7-1-stable](https://github.com/rails/rails/blob/7-1-stable/activestorage/CHANGELOG.md) for previous changes.
+Please check [7-2-stable](https://github.com/rails/rails/blob/7-2-stable/activestorage/CHANGELOG.md) for previous changes.

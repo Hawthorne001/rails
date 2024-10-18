@@ -102,7 +102,7 @@ NOTE: You need to enable the `hstore` extension to use hstore.
 
 ```ruby
 # db/migrate/20131009135255_create_profiles.rb
-class CreateProfiles < ActiveRecord::Migration[7.0]
+class CreateProfiles < ActiveRecord::Migration[8.0]
   enable_extension 'hstore' unless extension_enabled?('hstore')
   create_table :profiles do |t|
     t.hstore 'settings'
@@ -332,6 +332,7 @@ def up
   add_enum_value :article_state, "archived" # will be at the end after published
   add_enum_value :article_state, "in review", before: "published"
   add_enum_value :article_state, "approved", after: "in review"
+  add_enum_value :article_state, "rejected", if_not_exists: true # won't raise an error if the value already exists
 end
 ```
 
@@ -615,7 +616,7 @@ Deferrable Foreign Keys
 
 * [foreign key table constraints](https://www.postgresql.org/docs/current/sql-set-constraints.html)
 
-By default, table constraints in PostgreSQL are checked immediately after each statement. It intentionally does not allow creating records where the referenced record is not yet in the referenced table. It is possible to run this integrity check later on when the transactions is committed by adding `DEFERRABLE` to the foreign key definition though. To defer all checks by default it can be set to `DEFERRABLE INITIALLY DEFERRED`. Rails exposes this PostgreSQL feature by adding the `:deferrable` key to the `foreign_key` options in the `add_reference` and `add_foreign_key` methods.
+By default, table constraints in PostgreSQL are checked immediately after each statement. It intentionally does not allow creating records where the referenced record is not yet in the referenced table. It is possible to run this integrity check later on when the transaction is committed by adding `DEFERRABLE` to the foreign key definition though. To defer all checks by default it can be set to `DEFERRABLE INITIALLY DEFERRED`. Rails exposes this PostgreSQL feature by adding the `:deferrable` key to the `foreign_key` options in the `add_reference` and `add_foreign_key` methods.
 
 One example of this is creating circular dependencies in a transaction even if you have created foreign keys:
 
@@ -627,7 +628,7 @@ add_reference :alias, :person, foreign_key: { deferrable: :deferred }
 If the reference was created with the `foreign_key: true` option, the following transaction would fail when executing the first `INSERT` statement. It does not fail when the `deferrable: :deferred` option is set though.
 
 ```ruby
-ActiveRecord::Base.connection.transaction do
+ActiveRecord::Base.lease_connection.transaction do
   person = Person.create(id: SecureRandom.uuid, alias_id: SecureRandom.uuid, name: "John Doe")
   Alias.create(id: person.alias_id, person_id: person.id, name: "jaydee")
 end
@@ -636,8 +637,8 @@ end
 When the `:deferrable` option is set to `:immediate`, let the foreign keys keep the default behavior of checking the constraint immediately, but allow manually deferring the checks using `set_constraints` within a transaction. This will cause the foreign keys to be checked when the transaction is committed:
 
 ```ruby
-ActiveRecord::Base.connection.transaction do
-  ActiveRecord::Base.connection.set_constraints(:deferred)
+ActiveRecord::Base.lease_connection.transaction do
+  ActiveRecord::Base.lease_connection.set_constraints(:deferred)
   person = Person.create(alias_id: SecureRandom.uuid, name: "John Doe")
   Alias.create(id: person.alias_id, person_id: person.id, name: "jaydee")
 end

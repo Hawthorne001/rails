@@ -1,229 +1,112 @@
-*   Remove deprecated `ActiveSupport::Notifications::Event#children` and  `ActiveSupport::Notifications::Event#parent_of?`.
+*   Don't execute i18n watcher on boot. It shouldn't catch any file changes initially,
+    and unnecessarily slows down boot of applications with lots of translations.
 
-    *Rafael Mendonça França*
+    *Gannon McGibbon*, *David Stosik*
 
-*   Remove deprecated support to call the following methods without passing a deprecator:
+*   Fix `ActiveSupport::HashWithIndifferentAccess#stringify_keys` to stringify all keys not just symbols.
 
-    - `deprecate`
-    - `deprecate_constant`
-    - `ActiveSupport::Deprecation::DeprecatedObjectProxy.new`
-    - `ActiveSupport::Deprecation::DeprecatedInstanceVariableProxy.new`
-    - `ActiveSupport::Deprecation::DeprecatedConstantProxy.new`
-    - `assert_deprecated`
-    - `assert_not_deprecated`
-    - `collect_deprecations`
+    Previously:
 
-    *Rafael Mendonça França*
+    ```ruby
+    { 1 => 2 }.with_indifferent_access.stringify_keys[1] # => 2
+    ```
 
-*   Remove deprecated `ActiveSupport::Deprecation` delegation to instance.
+    After this change:
 
-    *Rafael Mendonça França*
+    ```ruby
+    { 1 => 2 }.with_indifferent_access.stringify_keys["1"] # => 2
+    ```
 
-*   Remove deprecated `SafeBuffer#clone_empty`.
-
-    *Rafael Mendonça França*
-
-*   Remove deprecated `#to_default_s` from `Array`, `Date`, `DateTime` and `Time`.
-
-    *Rafael Mendonça França*
-
-*   Remove deprecated support to passing `Dalli::Client` instances to `MemCacheStore`.
-
-    *Rafael Mendonça França*
-
-*   Remove deprecated `config.active_support.use_rfc4122_namespaced_uuids`.
-
-    *Rafael Mendonça França*
-
-*   Remove deprecated `config.active_support.remove_deprecated_time_with_zone_name`.
-
-    *Rafael Mendonça França*
-
-*   Remove deprecated `config.active_support.disable_to_s_conversion`.
-
-    *Rafael Mendonça França*
-
-*   Remove deprecated support to bolding log text with positional boolean in `ActiveSupport::LogSubscriber#color`.
-
-    *Rafael Mendonça França*
-
-*   Remove deprecated constants `ActiveSupport::LogSubscriber::CLEAR` and `ActiveSupport::LogSubscriber::BOLD`.
-
-    *Rafael Mendonça França*
-
-*   Remove deprecated support for `config.active_support.cache_format_version = 6.1`.
-
-    *Rafael Mendonça França*
-
-*   Remove deprecated `:pool_size` and `:pool_timeout` options for the cache storage.
-
-    *Rafael Mendonça França*
-
-*   Warn on tests without assertions.
-
-    `ActiveSupport::TestCase` now warns when tests do not run any assertions.
-    This is helpful in detecting broken tests that do not perform intended assertions.
-
-    *fatkodima*
-
-*   Support `hexBinary` type in `ActiveSupport::XmlMini`.
-
-    *heka1024*
-
-*   Deprecate `ActiveSupport::ProxyObject` in favor of Ruby's built-in `BasicObject`
-
-    *Earlopain*
-
-*   `stub_const` now accepts a `exists: false` parameter to allow stubbing missing constants.
+    This change can be seen as a bug fix, but since it behaved like this for a very long time, we're deciding
+    to not backport the fix and to make the change in a major release.
 
     *Jean Boussier*
 
-*   Make ActiveSupport::BacktraceCleaner copy filters and silencers on dup and clone
+## Rails 8.0.0.beta1 (September 26, 2024) ##
 
-    Previously the copy would still share the internal silencers and filters array,
-    causing state to leak.
-
-    *Jean Boussier*
-
-*   Updating Astana with Western Kazakhstan TZInfo identifier
-
-    *Damian Nelson*
-
-*   Add filename support for `ActiveSupport::Logger.logger_outputs_to?`
-
-    ```ruby
-    logger = Logger.new('/var/log/rails.log')
-    ActiveSupport::Logger.logger_outputs_to?(logger, '/var/log/rails.log')
-    ```
-
-    *Christian Schmidt*
-
-*   Include `IPAddr#prefix` when serializing an `IPAddr` using the
-    `ActiveSupport::MessagePack` serializer. This change is backward and forward
-    compatible — old payloads can still be read, and new payloads will be
-    readable by older versions of Rails.
-
-    *Taiki Komaba*
-
-*   Add `default:` support for `ActiveSupport::CurrentAttributes.attribute`
-
-    ```ruby
-    class Current < ActiveSupport::CurrentAttributes
-      attribute :counter, default: 0
-    end
-    ```
-
-    *Sean Doyle*
-
-*   Remove deprecated support for the pre-Ruby 2.4 behavior of `to_time` returning a `Time` object with local timezone.
-
-    *Rafael Mendonça França*
-
-*   Deprecate `config.active_support.to_time_preserves_timezone`.
-
-    *Rafael Mendonça França*
-
-*   Deprecate `DateAndTime::Compatibility.preserve_timezone`.
-
-    *Rafael Mendonça França*
-
-*   Yield instance to `Object#with` block
-
-    ```ruby
-    client.with(timeout: 5_000) do |c|
-      c.get("/commits")
-    end
-    ```
-
-    *Sean Doyle*
-
-*   Use logical core count instead of physical core count to determine the
-    default number of workers when parallelizing tests.
-
-    *Jonathan Hefner*
-
-*   Fix `Time.now/DateTime.now/Date.today` to return results in a system timezone after `#travel_to`.
-
-    There is a bug in the current implementation of #travel_to:
-    it remembers a timezone of its argument, and all stubbed methods start
-    returning results in that remembered timezone. However, the expected
-    behaviour is to return results in a system timezone.
-
-    *Aleksei Chernenkov*
-
-*   Add `ErrorReported#unexpected` to report precondition violations.
-
-    For example:
-
-    ```ruby
-    def edit
-      if published?
-        Rails.error.unexpected("[BUG] Attempting to edit a published article, that shouldn't be possible")
-        return false
-      end
-      # ...
-    end
-    ```
-
-    The above will raise an error in development and test, but only report the error in production.
-
-    *Jean Boussier*
-
-*   Make the order of read_multi and write_multi notifications for `Cache::Store#fetch_multi` operations match the order they are executed in.
+*   Include options when instrumenting `ActiveSupport::Cache::Store#delete` and `ActiveSupport::Cache::Store#delete_multi`.
 
     *Adam Renberg Tamm*
 
-*   Make return values of `Cache::Store#write` consistent.
+*   Print test names when running `rails test -v` for parallel tests.
 
-    The return value was not specified before. Now it returns `true` on a successful write,
-    `nil` if there was an error talking to the cache backend, and `false` if the write failed
-    for another reason (e.g. the key already exists and `unless_exist: true` was passed).
+    *John Hawthorn*, *Abeid Ahmed*
 
-    *Sander Verdonschot*
+*   Deprecate `Benchmark.ms` core extension.
 
-*   Fix logged cache keys not always matching actual key used by cache action.
-
-    *Hartley McGuire*
-
-*   Improve error messages of `assert_changes` and `assert_no_changes`
-
-    `assert_changes` error messages now display objects with `.inspect` to make it easier
-    to differentiate nil from empty strings, strings from symbols, etc.
-    `assert_no_changes` error messages now surface the actual value.
-
-    *pcreux*
-
-*   Fix `#to_fs(:human_size)` to correctly work with negative numbers.
+    The `benchmark` gem will become bundled in Ruby 3.5
 
     *Earlopain*
 
-*   Fix `BroadcastLogger#dup` so that it duplicates the logger's `broadcasts`.
+*   `ActiveSupport::TimeWithZone#inspect` now uses ISO 8601 style time like `Time#inspect`
 
-    *Andrew Novoselac*
+    *John Hawthorn*
 
-*   Fix issue where `bootstrap.rb` overwrites the `level` of a `BroadcastLogger`'s `broadcasts`.
+*   `ActiveSupport::ErrorReporter#report` now assigns a backtrace to unraised exceptions.
 
-    *Andrew Novoselac*
+    Previously reporting an un-raised exception would result in an error report without
+    a backtrace. Now it automatically generates one.
 
-*   Fix compatibility with the `semantic_logger` gem.
+    *Jean Boussier*
 
-    The `semantic_logger` gem doesn't behave exactly like stdlib logger in that
-    `SemanticLogger#level` returns a Symbol while stdlib `Logger#level` returns an Integer.
+*   Add `escape_html_entities` option to `ActiveSupport::JSON.encode`.
 
-    This caused the various `LogSubscriber` classes in Rails to break when assigned a
-    `SemanticLogger` instance.
+    This allows for overriding the global configuration found at
+    `ActiveSupport.escape_html_entities_in_json` for specific calls to `to_json`.
 
-    *Jean Boussier*, *ojab*
+    This should be usable from controllers in the following manner:
+    ```ruby
+    class MyController < ApplicationController
+      def index
+        render json: { hello: "world" }, escape_html_entities: false
+      end
+    end
+    ```
 
-*   Fix MemoryStore to prevent race conditions when incrementing or decrementing.
+    *Nigel Baillie*
 
-    *Pierre Jambet*
+*   Raise when using key which can't respond to `#to_sym` in `EncryptedConfiguration`.
 
-*   Implement `HashWithIndifferentAccess#to_proc`.
+    As is the case when trying to use an Integer or Float as a key, which is unsupported.
 
-    Previously, calling `#to_proc` on `HashWithIndifferentAccess` object used inherited `#to_proc`
-    method from the `Hash` class, which was not able to access values using indifferent keys.
+    *zzak*
 
-    *fatkodima*
+*   Deprecate addition and since between two `Time` and `ActiveSupport::TimeWithZone`.
 
-Please check [7-1-stable](https://github.com/rails/rails/blob/7-1-stable/activesupport/CHANGELOG.md) for previous changes.
+    Previously adding time instances together such as `10.days.ago + 10.days.ago` or `10.days.ago.since(10.days.ago)` produced a nonsensical future date. This behavior is deprecated and will be removed in Rails 8.1.
+
+    *Nick Schwaderer*
+
+*   Support rfc2822 format for Time#to_fs & Date#to_fs.
+
+    *Akshay Birajdar*
+
+*   Optimize load time for `Railtie#initialize_i18n`. Filter `I18n.load_path`s passed to the file watcher to only those
+    under `Rails.root`. Previously the watcher would grab all available locales, including those in gems
+    which do not require a watcher because they won't change.
+
+    *Nick Schwaderer*
+
+*   Add a `filter` option to `in_order_of` to prioritize certain values in the sorting without filtering the results
+    by these values.
+
+    *Igor Depolli*
+
+*   Improve error message when using `assert_difference` or `assert_changes` with a
+    proc by printing the proc's source code (MRI only).
+
+    *Richard Böhme*, *Jean Boussier*
+
+*   Add a new configuration value `:zone` for `ActiveSupport.to_time_preserves_timezone` and rename the previous `true` value to `:offset`. The new default value is `:zone`.
+
+    *Jason Kim*, *John Hawthorn*
+
+*   Align instrumentation `payload[:key]` in ActiveSupport::Cache to follow the same pattern, with namespaced and normalized keys.
+
+    *Frederik Erbs Spang Thomsen*
+
+*   Fix `travel_to` to set usec 0 when `with_usec` is `false` and the given argument String or DateTime.
+
+    *mopp*
+
+Please check [7-2-stable](https://github.com/rails/rails/blob/7-2-stable/activesupport/CHANGELOG.md) for previous changes.

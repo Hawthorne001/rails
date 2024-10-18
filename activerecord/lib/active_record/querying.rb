@@ -10,7 +10,7 @@ module ActiveRecord
       :first_or_create, :first_or_create!, :first_or_initialize,
       :find_or_create_by, :find_or_create_by!, :find_or_initialize_by,
       :create_or_find_by, :create_or_find_by!,
-      :destroy_all, :delete_all, :update_all, :touch_all, :destroy_by, :delete_by,
+      :destroy, :destroy_all, :delete, :delete_all, :update_all, :touch_all, :destroy_by, :delete_by,
       :find_each, :find_in_batches, :in_batches,
       :select, :reselect, :order, :regroup, :in_order_of, :reorder, :group, :limit, :offset, :joins, :left_joins, :left_outer_joins,
       :where, :rewhere, :invert_where, :preload, :extract_associated, :eager_load, :includes, :from, :lock, :readonly,
@@ -19,6 +19,7 @@ module ActiveRecord
       :count, :average, :minimum, :maximum, :sum, :calculate,
       :pluck, :pick, :ids, :async_ids, :strict_loading, :excluding, :without, :with, :with_recursive,
       :async_count, :async_average, :async_minimum, :async_maximum, :async_sum, :async_pluck, :async_pick,
+      :insert, :insert_all, :insert!, :insert_all!, :upsert, :upsert_all
     ].freeze # :nodoc:
     delegate(*QUERYING_METHODS, to: :all)
 
@@ -55,12 +56,10 @@ module ActiveRecord
     end
 
     # Same as <tt>#find_by_sql</tt> but perform the query asynchronously and returns an ActiveRecord::Promise.
-    def async_find_by_sql(sql, binds = [], preparable: nil, &block)
-      result = with_connection do |c|
-        _query_by_sql(c, sql, binds, preparable: preparable, async: true)
-      end
-
-      result.then do |result|
+    def async_find_by_sql(sql, binds = [], preparable: nil, allow_retry: false, &block)
+      with_connection do |c|
+        _query_by_sql(c, sql, binds, preparable: preparable, allow_retry: allow_retry, async: true)
+      end.then do |result|
         _load_from_sql(result, &block)
       end
     end
@@ -70,6 +69,8 @@ module ActiveRecord
     end
 
     def _load_from_sql(result_set, &block) # :nodoc:
+      return [] if result_set.empty?
+
       column_types = result_set.column_types
 
       unless column_types.empty?
@@ -85,10 +86,10 @@ module ActiveRecord
 
       message_bus.instrument("instantiation.active_record", payload) do
         if result_set.includes_column?(inheritance_column)
-          result_set.map { |record| instantiate(record, column_types, &block) }
+          result_set.indexed_rows.map { |record| instantiate(record, column_types, &block) }
         else
           # Instantiate a homogeneous set
-          result_set.map { |record| instantiate_instance_of(self, record, column_types, &block) }
+          result_set.indexed_rows.map { |record| instantiate_instance_of(self, record, column_types, &block) }
         end
       end
     end
